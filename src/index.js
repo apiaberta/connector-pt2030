@@ -1,355 +1,197 @@
-import 'dotenv/config'
 import Fastify from 'fastify'
-import axios from 'axios'
+import swagger from '@fastify/swagger'
+import swaggerUi from '@fastify/swagger-ui'
+
+const SERVICE_NAME = 'connector-prr'
+const PORT = parseInt(process.env.PORT || '3014')
 
 const app = Fastify({
-  logger: process.env.NODE_ENV !== 'production'
-    ? { transport: { target: 'pino-pretty' } }
-    : undefined
+  logger: {
+    transport: process.env.NODE_ENV !== 'production'
+      ? { target: 'pino-pretty' }
+      : undefined
+  }
 })
 
-const SERVICE_NAME = 'connector-pt2030'
-const PORT = parseInt(process.env.PORT || '3014')
-const DADOS_GOV_API = 'https://dados.gov.pt/api/1'
-
-// ─── In-memory store ─────────────────────────────────────────────────────────
-
-let projectsStore = []
-let lastSynced = null
-let syncStatus = 'never'
-
-// ─── Demo seed data ───────────────────────────────────────────────────────────
-
-const DEMO_PROJECTS = [
-  {
-    id: 'PRR-001',
-    name: 'Digitalizacao da Administracao Publica',
-    beneficiary: 'Republica Portuguesa',
-    nif: '600084123',
-    component: 'C19 - Transformacao Digital',
-    investment: '707000000',
-    investment_unit: 'EUR',
-    status: 'approved',
-    start_date: '2021-06-01',
-    end_date: '2026-06-30',
-    location: 'Nacional',
-    description: 'Agenda de digitalizacao da administracao publica paramodernizacao dos servicos publicos',
-    fund_type: 'PRR'
+await app.register(swagger, {
+  openapi: {
+    info: {
+      title: 'API Aberta - PRR/PT2030 Connector',
+      description: 'PRR (Plano de Recuperacao e Resiliencia) and PT2030 project data from transparencia.gov.pt',
+      version: '1.0.0',
+    },
+    servers: [{ url: 'http://localhost:' + PORT }],
+    tags: [
+      { name: 'PRR', description: 'Plano de Recuperacao e Resiliencia projects' },
+      { name: 'PT2030', description: 'Portugal 2030 funding programmes' },
+    ],
   },
-  {
-    id: 'PRR-002',
-    name: 'Linha de Credito para PMEs Digitais',
-    beneficiary: 'IAPMEI',
-    nif: '601384772',
-    component: 'C19 - Transformacao Digital',
-    investment: '130000000',
-    investment_unit: 'EUR',
-    status: 'approved',
-    start_date: '2022-01-01',
-    end_date: '2025-12-31',
-    location: 'Nacional',
-    description: 'Apoio a projetos de digitalizacao em pequenas e medias empresas',
-    fund_type: 'PRR'
-  },
-  {
-    id: 'PRR-003',
-    name: 'Eficiencia Energetica em Edificios Publicos',
-    beneficiary: 'DGAE',
-    nif: '600084456',
-    component: 'C12 - Sustentabilidade',
-    investment: '320000000',
-    investment_unit: 'EUR',
-    status: 'approved',
-    start_date: '2022-03-01',
-    end_date: '2026-03-31',
-    location: 'Nacional',
-    description: 'Intervencoes de eficiencia energetica em edificios da administracao central e local',
-    fund_type: 'PRR'
-  },
-  {
-    id: 'PRR-004',
-    name: 'Ferrovias de Portugal - Modernizacao',
-    beneficiary: 'IP',
-    nif: '600084321',
-    component: 'C11 - Ferrovia',
-    investment: '2300000000',
-    investment_unit: 'EUR',
-    status: 'approved',
-    start_date: '2021-10-01',
-    end_date: '2026-12-31',
-    location: 'Nacional',
-    description: 'Modernizacao e eletrificacao de linhas ferreas Secundarias',
-    fund_type: 'PRR'
-  },
-  {
-    id: 'PRR-005',
-    name: 'Habitar Portugal - Apoio a Construcao',
-    beneficiary: 'Instituto da Habitacao',
-    nif: '600084789',
-    component: 'C01 - Housing First',
-    investment: '115000000',
-    investment_unit: 'EUR',
-    status: 'approved',
-    start_date: '2022-06-01',
-    end_date: '2026-06-30',
-    location: 'Nacional',
-    description: 'Programa de apoio a construcao de habitacao a precos acessiveis',
-    fund_type: 'PRR'
-  },
-  {
-    id: 'PT2030-001',
-    name: 'Sistema de Incentivos a Investigacao',
-    beneficiary: 'FCT',
-    nif: '600084999',
-    component: 'POCH',
-    investment: '450000000',
-    investment_unit: 'EUR',
-    status: 'approved',
-    start_date: '2024-01-01',
-    end_date: '2029-12-31',
-    location: 'Nacional',
-    description: 'Apoio a projetos de investigacao cientifica em universidades einstitutos',
-    fund_type: 'PT2030'
-  },
-  {
-    id: 'PT2030-002',
-    name: 'Internacionalizacao de PMEs',
-    beneficiary: 'AICEP',
-    nif: '600085111',
-    component: 'COMPETE2030',
-    investment: '200000000',
-    investment_unit: 'EUR',
-    status: 'approved',
-    start_date: '2024-03-01',
-    end_date: '2029-12-31',
-    location: 'Nacional',
-    description: 'Incentivos a internacionalizacao e competitividade das pequenas emedias empresas',
-    fund_type: 'PT2030'
-  },
-  {
-    id: 'PT2030-003',
-    name: 'Transicoes Digital e Energetica',
-    beneficiary: 'AD&C',
-    nif: '600085222',
-    component: 'PT2030',
-    investment: '580000000',
-    investment_unit: 'EUR',
-    status: 'approved',
-    start_date: '2024-01-01',
-    end_date: '2029-12-31',
-    location: 'Nacional',
-    description: 'Apoio a investimentos em transicao digital e energetica paraempresas',
-    fund_type: 'PT2030'
-  },
-  {
-    id: 'PT2030-004',
-    name: 'Desenvolvimento do Interior',
-    beneficiary: 'CCDR Norte',
-    nif: '600085333',
-    component: 'PT2030',
-    investment: '150000000',
-    investment_unit: 'EUR',
-    status: 'approved',
-    start_date: '2024-06-01',
-    end_date: '2029-12-31',
-    location: 'Interior Norte',
-    description: 'Programas de coesao territorial para o interior do pais',
-    fund_type: 'PT2030'
-  },
-  {
-    id: 'PT2030-005',
-    name: 'Formacao e Qualificacao Profissional',
-    beneficiary: 'IEFP',
-    nif: '600085444',
-    component: 'POCH',
-    investment: '300000000',
-    investment_unit: 'EUR',
-    status: 'approved',
-    start_date: '2024-01-01',
-    end_date: '2029-12-31',
-    location: 'Nacional',
-    description: 'Apoio a formacao profissional e requalificacao de trabalhadores',
-    fund_type: 'PT2030'
-  }
-]
+})
 
-// ─── Seed demo data ───────────────────────────────────────────────────────────
+await app.register(swaggerUi, {
+  routePrefix: '/docs',
+  uiConfig: { docExpansion: 'list' },
+})
 
-projectsStore = [...DEMO_PROJECTS]
-
-// ─── Sync from dados.gov.pt ─────────────────────────────────────────────────
-
-async function syncFromDadosGov () {
-  try {
-    app.log.info('Syncing PRR projects from dados.gov.pt...')
-
-    // Search for PRR projects dataset
-    const searchRes = await axios.get(`${DADOS_GOV_API}/datasets/`, {
-      params: { q: 'PRR projetos', page_size: 5 },
-      timeout: 15000
-    })
-
-    const datasets = searchRes.data?.data || []
-    const projectsDataset = datasets.find(d =>
-      d.title?.toLowerCase().includes('projetos') &&
-      d.organization?.acronym === 'EMRP'
-    )
-
-    if (!projectsDataset) {
-      app.log.warn('PRR projects dataset not found on dados.gov.pt, using demo data')
-      syncStatus = 'demo_only'
-      return
-    }
-
-    // Get dataset resources to find downloadable files
-    const resources = projectsDataset.resources || []
-    const xlsxResource = resources.find(r => r.format === 'xlsx' || r.format === 'csv')
-
-    if (xlsxResource) {
-      app.log.info({ url: xlsxResource.url, format: xlsxResource.format },
-        'Found PRR projects file, manual download required')
-    }
-
-    syncStatus = 'synced'
-    lastSynced = new Date().toISOString()
-    app.log.info('Sync complete — using stored demo data with dados.gov.pt reference')
-  } catch (err) {
-    app.log.warn({ err: err.message }, 'Failed to sync from dados.gov.pt, using demo data')
-    syncStatus = 'demo_only'
-  }
-}
-
-// ─── Required health + meta endpoints ───────────────────────────────────────
+app.get('/swagger', async () => app.swagger())
 
 app.get('/health', async () => ({
   status: 'ok',
   service: SERVICE_NAME,
+  version: '1.0.0',
   timestamp: new Date().toISOString()
 }))
 
 app.get('/meta', async () => ({
   service: SERVICE_NAME,
-  description: 'PRR and Portugal 2030 European funds projects API',
-  sources: {
-    dados_gov: 'https://dados.gov.pt (Estrutura de Missao Recuperar Portugal)',
-    transparencia: 'https://transparencia.gov.pt/pt/fundos-europeus/prr/',
-    prr2030: 'https://prr2030.pt'
-  },
-  sync_status: syncStatus,
-  last_synced: lastSynced,
-  record_count: projectsStore.length,
-  data_note: syncStatus === 'demo_only'
-    ? 'Running with demo data — awaiting official data source from dados.gov.pt'
-    : 'Data synced from dados.gov.pt'
+  version: '1.0.0',
+  description: 'PRR and PT2030 project data',
+  source: 'https://transparencia.gov.pt',
+  docs: 'https://github.com/apiaberta/connector-prr'
 }))
 
-// ─── GET /pt2030/projects ─────────────────────────────────────────────────────
+const PRR_COMPONENTS = [
+  { id: 'C01', name: 'Servico Nacional de Saude', section: 'component' },
+  { id: 'C01', name: 'Cuidados de saude primarios com mais respostas', section: 'investment', parent_id: 'C01' },
+  { id: 'C01', name: 'Rede Nacional de Cuidados Continuados Integrados e Rede Nacional de Cuidados Paliativos', section: 'investment', parent_id: 'C01' },
+  { id: 'C01', name: 'Conclusao da reforma da saude mental e implementacao da Estrategia para as Demencias', section: 'investment', parent_id: 'C01' },
+  { id: 'C01', name: 'Construcao do Hospital de Lisboa Oriental e equipamento para hospitais em Lisboa e Vale do Tejo', section: 'investment', parent_id: 'C01' },
+  { id: 'C01', name: 'Transicao digital da saude', section: 'investment', parent_id: 'C01' },
+  { id: 'C01', name: 'Fortalecimento do Servico Regional de Saude da Regiao Autonoma da Madeira', section: 'investment', parent_id: 'C01' },
+  { id: 'C01', name: 'Digitalizacao do Servico Regional de Saude da Madeira', section: 'investment', parent_id: 'C01' },
+  { id: 'C01', name: 'Hospital Digital da Regiao Autonoma dos Acores', section: 'investment', parent_id: 'C01' },
+  { id: 'C01', name: 'Sistema Universal de Apoio a Vida Ativa', section: 'investment', parent_id: 'C01' },
+  { id: 'C01', name: 'Programa de Modernizacao Tecnologica do SNS', section: 'investment', parent_id: 'C01' },
+  { id: 'C02', name: 'Habitacao', section: 'component' },
+  { id: 'C02', name: 'Alojamento estudantil a custos acessiveis', section: 'investment', parent_id: 'C02' },
+  { id: 'C02', name: 'Aumentar as condicoes habitacionais do parque habitacional da Regiao Autonoma dos Acores', section: 'investment', parent_id: 'C02' },
+  { id: 'C02', name: 'Bolsa Nacional de Alojamento Urgente e Temporario', section: 'investment', parent_id: 'C02' },
+  { id: 'C02', name: 'Infraestruturas para parcelas de terreno destinadas a habitacao', section: 'investment', parent_id: 'C02' },
+  { id: 'C02', name: 'Programa de apoio ao acesso a habitacao (emprestimo)', section: 'investment', parent_id: 'C02' },
+  { id: 'C02', name: 'Parque habitacional publico a custos acessiveis', section: 'investment', parent_id: 'C02' },
+  { id: 'C02', name: 'Programa de apoio ao acesso a habitacao', section: 'investment', parent_id: 'C02' },
+  { id: 'C02', name: 'Reforco da oferta de habitacao apoiada na Regiao Autonoma da Madeira', section: 'investment', parent_id: 'C02' },
+  { id: 'C02', name: 'Reforco do parque habitacional social', section: 'investment', parent_id: 'C02' },
+  { id: 'C03', name: 'Respostas sociais', section: 'component' },
+  { id: 'C03', name: 'Acessibilidades 360', section: 'investment', parent_id: 'C03' },
+  { id: 'C03', name: 'Fortalecimento das respostas sociais na Regiao Autonoma da Madeira (RAM)', section: 'investment', parent_id: 'C03' },
+  { id: 'C03', name: 'Implementar a Estrategia Regional de Combate a Pobreza e Exclusao Social - Redes de Apoio Social (RAA)', section: 'investment', parent_id: 'C03' },
+  { id: 'C03', name: 'Modernizacao e expansao da rede de estruturas residenciais para pessoas idosas (ERPI)', section: 'investment', parent_id: 'C03' },
+  { id: 'C03', name: 'Nova Geracao de Equipamentos e Respostas Sociais', section: 'investment', parent_id: 'C03' },
+  { id: 'C03', name: 'Operacoes integradas em comunidades desfavorecidas nas Areas Metropolitanas de Lisboa e do Porto', section: 'investment', parent_id: 'C03' },
+  { id: 'C03', name: 'Plataforma +Acesso', section: 'investment', parent_id: 'C03' },
+  { id: 'C04', name: 'Cultura', section: 'component' },
+  { id: 'C04', name: 'Patrimonio cultural', section: 'investment', parent_id: 'C04' },
+  { id: 'C04', name: 'Redes culturais e transicao digital', section: 'investment', parent_id: 'C04' },
+  { id: 'C05', name: 'Investimento e inovacao', section: 'component' },
+  { id: 'C05', name: 'Agenda de investigacao e inovacao para a sustentabilidade da agricultura, alimentacao e agroindustria', section: 'investment', parent_id: 'C05' },
+  { id: 'C05', name: 'Agendas mobilizadoras para a Inovacao Empresarial', section: 'investment', parent_id: 'C05' },
+  { id: 'C05', name: 'Agendas Verdes para a Inovacao Empresarial', section: 'investment', parent_id: 'C05' },
+  { id: 'C05', name: 'Capitalizacao de empresas e resiliencia financeira/Banco Portugues de Fomento', section: 'investment', parent_id: 'C05' },
+  { id: 'C05', name: 'Ciencia Mais Digital', section: 'investment', parent_id: 'C05' },
+  { id: 'C05', name: 'Instrumentos de capitalizacao para empresas da Madeira', section: 'investment', parent_id: 'C05' },
+  { id: 'C05', name: 'Missao Interface - renovacao da rede de suporte cientifico e tecnologico e orientacao para tecido produtivo', section: 'investment', parent_id: 'C05' },
+  { id: 'C05', name: 'Recapitalizar o Sistema Empresarial dos Acores', section: 'investment', parent_id: 'C05' },
+  { id: 'C05', name: 'Recuperacao economica da agricultura dos Acores', section: 'investment', parent_id: 'C05' },
+  { id: 'C06', name: 'Qualificacoes e competencias', section: 'component' },
+  { id: 'C06', name: 'Ampliacao do edificio do CITMA', section: 'investment', parent_id: 'C06' },
+  { id: 'C06', name: 'Ciencia Mais Capacitacao', section: 'investment', parent_id: 'C06' },
+  { id: 'C06', name: 'Compromisso para o emprego sustentavel', section: 'investment', parent_id: 'C06' },
+  { id: 'C06', name: 'Escolas novas ou renovadas', section: 'investment', parent_id: 'C06' },
+  { id: 'C06', name: 'Impulso Jovens - CTEAM', section: 'investment', parent_id: 'C06' },
+  { id: 'C06', name: 'Impulso Mais Digital', section: 'investment', parent_id: 'C06' },
+  { id: 'C06', name: 'Incentivo Adultos', section: 'investment', parent_id: 'C06' },
+  { id: 'C06', name: 'Modernizacao das instituicoes de ensino e formacao profissionais', section: 'investment', parent_id: 'C06' },
+  { id: 'C06', name: 'Qualificacao de Adultos e Aprendizagem ao Longo da Vida (RAA)', section: 'investment', parent_id: 'C06' },
+  { id: 'C07', name: 'Infraestruturas', section: 'component' },
+  { id: 'C07', name: 'Alargamento da Rede de Carregamento de Veiculos Eletricos', section: 'investment', parent_id: 'C07' },
+  { id: 'C07', name: 'Areas de acolhimento de empresas', section: 'investment', parent_id: 'C07' },
+  { id: 'C07', name: 'Circuitos logisticos - Rede Regional dos Acores', section: 'investment', parent_id: 'C07' },
+  { id: 'C07', name: 'Ligacoes em falta e aumento de capacidade da rede', section: 'investment', parent_id: 'C07' },
+  { id: 'C07', name: 'Ligacoes transfronteiras', section: 'investment', parent_id: 'C07' },
+  { id: 'C07', name: 'Zonas de acolhimento de empresas - acessibilidade rodoviaria', section: 'investment', parent_id: 'C07' },
+  { id: 'C08', name: 'Florestas', section: 'component' },
+  { id: 'C08', name: 'Cadastro da propriedade rustica e Sistema de Monitorizacao da Ocupacao do Solo', section: 'investment', parent_id: 'C08' },
+  { id: 'C08', name: 'Meios de prevencao e combate a incendios rurais', section: 'investment', parent_id: 'C08' },
+  { id: 'C08', name: 'Programa MAIS Floresta', section: 'investment', parent_id: 'C08' },
+  { id: 'C08', name: 'Quebras na gestao do combustivel - rede primaria', section: 'investment', parent_id: 'C08' },
+  { id: 'C08', name: 'Transformacao da paisagem dos territorios de floresta vulneraveis', section: 'investment', parent_id: 'C08' },
+  { id: 'C09', name: 'Gestao hidrica', section: 'component' },
+  { id: 'C09', name: 'Aproveitamento hidraulico de fins multiplos do Crato - fase de construcao', section: 'investment', parent_id: 'C09' },
+  { id: 'C09', name: 'Aproveitamento hidraulico de fins multiplos do Crato - fase de planeamento', section: 'investment', parent_id: 'C09' },
+  { id: 'C09', name: 'Plano de eficiencia e reforco hidrico dos sistemas de abastecimento e regadio da RAM', section: 'investment', parent_id: 'C09' },
+  { id: 'C09', name: 'Plano Regional de Eficiencia Hidrica do Algarve', section: 'investment', parent_id: 'C09' },
+]
 
-app.get('/pt2030/projects', async (request) => {
-  const {
-    page = 1,
-    limit = 20,
-    status,
-    fund_type,
-    component,
-    search
-  } = request.query
-
-  let results = [...projectsStore]
-
-  if (status) {
-    results = results.filter(p => p.status === status)
-  }
-  if (fund_type) {
-    results = results.filter(p => p.fund_type === fund_type)
-  }
-  if (component) {
-    results = results.filter(p =>
-      p.component.toLowerCase().includes(component.toLowerCase())
-    )
-  }
-  if (search) {
-    const q = search.toLowerCase()
-    results = results.filter(p =>
-      p.name.toLowerCase().includes(q) ||
-      p.beneficiary.toLowerCase().includes(q) ||
-      p.description?.toLowerCase().includes(q)
-    )
-  }
-
-  const total = results.length
-  const pageNum = Math.max(1, parseInt(page))
-  const limitNum = Math.min(100, Math.max(1, parseInt(limit)))
-  const start = (pageNum - 1) * limitNum
-  const items = results.slice(start, start + limitNum)
-
-  return {
-    data: items,
-    pagination: {
-      page: pageNum,
-      limit: limitNum,
-      total,
-      total_pages: Math.ceil(total / limitNum)
-    },
-    meta: {
-      source: syncStatus === 'demo_only'
-        ? 'demo — awaiting official source'
-        : 'dados.gov.pt'
+app.get('/prr/components', {
+  schema: {
+    description: 'List all PRR components and investments',
+    tags: ['PRR'],
+    querystring: {
+      type: 'object',
+      properties: {
+        section: { type: 'string', description: 'Filter: component or investment' }
+      }
     }
   }
+}, async (req) => {
+  const { section } = req.query
+  let data = PRR_COMPONENTS
+  if (section) {
+    data = data.filter(i => i.section === section)
+  }
+  return { total: data.length, data, source: 'https://transparencia.gov.pt' }
 })
 
-// ─── GET /pt2030/projects/:id ─────────────────────────────────────────────────
-
-app.get('/pt2030/projects/:id', async (request, reply) => {
-  const { id } = request.params
-  const project = projectsStore.find(p => p.id === id)
-
-  if (!project) {
-    reply.code(404)
-    return { error: 'Project not found', id }
-  }
-
-  return { data: project }
-})
-
-// ─── GET /pt2030/stats ────────────────────────────────────────────────────────
-
-app.get('/pt2030/stats', async () => {
-  const total = projectsStore.length
-
-  const byStatus = {}
-  const byFundType = {}
-  const byComponent = {}
-  let totalInvestment = 0
-
-  for (const p of projectsStore) {
-    byStatus[p.status] = (byStatus[p.status] || 0) + 1
-    byFundType[p.fund_type] = (byFundType[p.fund_type] || 0) + 1
-    byComponent[p.component] = (byComponent[p.component] || 0) + 1
-    totalInvestment += parseFloat(p.investment) || 0
-  }
-
+app.get('/prr/summary', {
+  schema: { description: 'Get PRR summary statistics', tags: ['PRR'] }
+}, async () => {
+  const components = [...new Set(PRR_COMPONENTS.filter(i => i.section === 'component').map(i => ({ id: i.id, name: i.name })))]
   return {
-    data: {
-      total_projects: total,
-      total_investment_eur: totalInvestment,
-      by_status: byStatus,
-      by_fund_type: byFundType,
-      by_component: byComponent
-    },
-    meta: {
-      source: syncStatus === 'demo_only'
-        ? 'demo — awaiting official source'
-        : 'dados.gov.pt',
-      generated_at: new Date().toISOString()
+    plan: 'PRR - Plano de Recuperacao e Resiliencia',
+    execution_period: '2021-2026',
+    total_components: components.length,
+    total_investments: PRR_COMPONENTS.filter(i => i.section === 'investment').length,
+    source: 'https://transparencia.gov.pt',
+    components,
+  }
+})
+
+app.get('/prr/projects', {
+  schema: {
+    description: 'Search PRR projects',
+    tags: ['PRR'],
+    querystring: {
+      type: 'object',
+      properties: {
+        q: { type: 'string', description: 'Search term' },
+        component: { type: 'string', description: 'Filter by component ID (e.g. C01)' },
+        page: { type: 'integer', default: 1, minimum: 1 },
+        limit: { type: 'integer', default: 20, minimum: 1, maximum: 100 }
+      }
     }
   }
+}, async (req) => {
+  const { q, component, page = 1, limit = 20 } = req.query
+  let data = PRR_COMPONENTS.filter(i => i.section === 'investment')
+  if (component) data = data.filter(i => i.id === component.toUpperCase())
+  if (q) data = data.filter(i => i.name.toLowerCase().includes(q.toLowerCase()) || i.id.includes(q.toUpperCase()))
+  const start = (page - 1) * limit
+  return { query: q || null, component: component || null, page, limit, data: data.slice(start, start + limit), total: data.length, source: 'https://transparencia.gov.pt' }
 })
 
-// ─── Startup ───────────────────────────────────────────────────────────────────
-
-await syncFromDadosGov()
+app.get('/pt2030/summary', {
+  schema: { description: 'Get PT2030 (Portugal 2030) summary', tags: ['PT2030'] }
+}, async () => {
+  return {
+    plan: 'PT2030 - Portugal 2030',
+    description: 'Next generation EU funding programme for Portugal',
+    execution_period: '2021-2027',
+    total_budget: 'EUR 23.4 billion',
+    source: 'https://portugalglobal.pt/PT2030',
+    note: 'PT2030 data available at https://prr2030.pt and https://portugalglobal.pt/PT2030'
+  }
+})
 
 await app.listen({ port: PORT, host: '0.0.0.0' })
-app.log.info(`${SERVICE_NAME} listening on port ${PORT}`)
+app.log.info(SERVICE_NAME + ' listening on port ' + PORT)

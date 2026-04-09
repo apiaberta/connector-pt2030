@@ -1,47 +1,45 @@
-# connector-pt2030
+# API Aberta — PRR / PT2030 Connector
 
-PRR and Portugal 2030 European Funds Projects API Connector for API Aberta.
-
-## Overview
-
-Provides a REST API for accessing PRR (Plano de Recuperação e Resiliência) and PT2030 (Portugal 2030) European funds projects data.
+PRR (Plano de Recuperação e Resiliência) and PT2030 project data from transparencia.gov.pt.
 
 ## Endpoints
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/health` | Health check |
-| GET | `/meta` | Service metadata |
-| GET | `/pt2030/projects` | List projects (supports filtering) |
-| GET | `/pt2030/projects/:id` | Get project by ID |
-| GET | `/pt2030/stats` | Aggregate statistics |
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | /health | Service health check |
+| GET | /meta | Service metadata |
+| GET | /docs | Swagger documentation |
+| GET | /prr/components | List all PRR components and investments |
+| GET | /prr/projects | Search PRR projects |
+| GET | /prr/summary | PRR summary with component list |
+| GET | /pt2030/summary | PT2030 summary |
 
-## Query Parameters (GET /pt2030/projects)
+## Quick Start
 
-| Param | Description |
-|-------|-------------|
-| `page` | Page number (default: 1) |
-| `limit` | Results per page (default: 20, max: 100) |
-| `status` | Filter by status (e.g. approved, in_progress) |
-| `fund_type` | Filter by fund type (PRR or PT2030) |
-| `component` | Filter by component name |
-| `search` | Full-text search on name, beneficiary, description |
-
-## Running
-
-```bash
 npm install
-npm start          # production (PM2)
-npm run dev        # development with watch
-```
+npm start
 
-Requires `.env` file with `PORT` variable (defaults to 3014).
+## Environment
 
-## Data Source
+PORT: 3014
 
-Currently running with demo data. Awaiting official data source from dados.gov.pt API.
+## Data Sources
 
-Official sources:
-- https://dados.gov.pt (Estrutura de Missão Recuperar Portugal)
-- https://transparencia.gov.pt/pt/fundos-europeus/prr/
-- https://prr2030.pt
+- PRR: https://transparencia.gov.pt
+- PT2030: https://prr2030.pt, https://portugalglobal.pt/PT2030
+
+## PRR Components
+
+C01: Serviço Nacional de Saúde
+C02: Habitação
+C03: Respostas sociais
+C04: Cultura
+C05: Investimento e inovação
+C06: Qualificações e competências
+C07: Infraestruturas
+C08: Florestas
+C09: Gestão hídrica
+
+## License
+
+MIT
