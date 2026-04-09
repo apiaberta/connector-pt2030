@@ -1,0 +1,19 @@
+{
+  "name": "@apiaberta/connector-pt2030",
+  "version": "1.0.0",
+  "description": "PRR and Portugal 2030 European funds projects connector for API Aberta",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/index.js",
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "axios": "^1.7.0",
+    "dotenv": "^16.4.0",
+    "fastify": "^5.0.0",
+    "pino-pretty": "^13.0.0"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}
