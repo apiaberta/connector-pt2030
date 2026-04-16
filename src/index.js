@@ -42,13 +42,18 @@ app.get('/health', async () => ({
   timestamp: new Date().toISOString()
 }))
 
-app.get('/meta', async () => ({
+const META = {
   service: SERVICE_NAME,
   version: '1.0.0',
   description: 'PRR and PT2030 project data',
   source: 'https://transparencia.gov.pt',
   docs: 'https://github.com/apiaberta/connector-prr'
-}))
+}
+
+app.get('/meta', async () => META)
+
+// Gateway-compatible meta (served at /prr/meta for gateway proxy)
+app.get('/prr/meta', async () => META)
 
 const PRR_COMPONENTS = [
   { id: 'C01', name: 'Servico Nacional de Saude', section: 'component' },
