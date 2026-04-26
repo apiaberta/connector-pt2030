@@ -55,6 +55,9 @@ app.get('/meta', async () => META)
 // Gateway-compatible meta (served at /prr/meta for gateway proxy)
 app.get('/prr/meta', async () => META)
 
+// Gateway-compatible meta for PT2030 prefix
+app.get('/pt2030/meta', async () => META)
+
 const PRR_COMPONENTS = [
   { id: 'C01', name: 'Servico Nacional de Saude', section: 'component' },
   { id: 'C01', name: 'Cuidados de saude primarios com mais respostas', section: 'investment', parent_id: 'C01' },
